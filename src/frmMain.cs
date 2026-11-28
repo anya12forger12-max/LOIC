@@ -7,8 +7,10 @@ using System;
 using System.Diagnostics;
 using System.Collections.Generic;
 using System.Collections.Specialized;
+using System.IO;
 using System.Net;
 using System.Net.Sockets;
+using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Windows.Forms;
@@ -20,6 +22,8 @@ namespace LOIC
 	{
 		const string AttackText = "IMMA CHARGIN MAH LAZER";
 		const string StpFldText = "Stop flooding";
+		const int MaxOverlordResponseBytes = 1024 * 1024;
+		const int OverlordRequestTimeoutMs = 15000;
 
 		private List<IFlooder> arr = new List<IFlooder>();
 		private StringCollection aUpOLSites = new StringCollection();
@@ -1068,6 +1072,115 @@ namespace LOIC
 			Process.Start("https://github.com/NewEraCracker/LOIC");
 		}
 
+		private sealed class OverlordCommand
+		{
+			public int Index;
+			public string Kind;
+			public string ClassName;
+			public bool Reverse;
+			public string Url;
+			public List<string> Keys = new List<string>();
+			public List<string> Values = new List<string>();
+		}
+
+		// The old OverLord parser used a nested quantified regex over an
+		// unbounded HTTP response. A crafted "[LOIC] a:b a:b ..." body without
+		// a closing tag made it backtrack exponentially and hang the UI thread.
+		// Each of these patterns is linear in the size of the response.
+		private static readonly Regex OverlordBlockRegex = new Regex(
+			@"\[LOIC\](?<body>.*?)\[/LOIC\]",
+			RegexOptions.IgnoreCase | RegexOptions.Singleline | RegexOptions.Compiled);
+		private static readonly Regex OverlordPairRegex = new Regex(
+			@"@?(?<cmd>[A-Za-z0-9_]+)\s*:\s*(?<val>[^\r\n@]+)",
+			RegexOptions.IgnoreCase | RegexOptions.Compiled);
+		private static readonly Regex OverlordClassRegex = new Regex(
+			@"class\s*=\s*""LO\s+(bu|tar)\s*(r)?""\s+href\s*=\s*""(?<url>[^""]*)""",
+			RegexOptions.IgnoreCase | RegexOptions.Compiled);
+		private static readonly Regex OverlordUrlRegex = new Regex(
+			@"LOIC:\s*http://(?<url>\S+)",
+			RegexOptions.IgnoreCase | RegexOptions.Compiled);
+		private static readonly Regex OverlordTagRegex = new Regex(@"<[^>]*>", RegexOptions.Compiled);
+
+		private static string DownloadOverlordResponse(string url)
+		{
+			HttpWebRequest request = (HttpWebRequest)WebRequest.Create(url);
+			request.Timeout = OverlordRequestTimeoutMs;
+			request.ReadWriteTimeout = OverlordRequestTimeoutMs;
+			request.AllowAutoRedirect = true;
+			request.UserAgent = "Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.0)";
+
+			HttpWebResponse response = (HttpWebResponse)request.GetResponse();
+			try
+			{
+				using (Stream stream = response.GetResponseStream())
+				using (MemoryStream buffer = new MemoryStream())
+				{
+					byte[] chunk = new byte[8192];
+					int read;
+					while ((read = stream.Read(chunk, 0, chunk.Length)) > 0)
+					{
+						if ((long)buffer.Length + read > MaxOverlordResponseBytes)
+							throw new IOException("OverLord response exceeded the size limit");
+						buffer.Write(chunk, 0, read);
+					}
+					return Encoding.UTF8.GetString(buffer.ToArray());
+				}
+			}
+			finally
+			{
+				response.Close();
+			}
+		}
+
+		private static List<OverlordCommand> ParseOverlordCommands(string response)
+		{
+			List<OverlordCommand> commands = new List<OverlordCommand>();
+
+			foreach (Match block in OverlordBlockRegex.Matches(response))
+			{
+				string body = OverlordTagRegex.Replace(block.Groups["body"].Value, " ");
+				MatchCollection pairs = OverlordPairRegex.Matches(body);
+				if (pairs.Count == 0)
+					continue;
+
+				OverlordCommand command = new OverlordCommand();
+				command.Index = block.Index;
+				command.Kind = "pairs";
+				foreach (Match pair in pairs)
+				{
+					command.Keys.Add(pair.Groups["cmd"].Value);
+					command.Values.Add(pair.Groups["val"].Value);
+				}
+				commands.Add(command);
+			}
+
+			foreach (Match link in OverlordClassRegex.Matches(response))
+			{
+				OverlordCommand command = new OverlordCommand();
+				command.Index = link.Index;
+				command.Kind = "class";
+				command.ClassName = link.Groups[1].Value.ToLowerInvariant();
+				command.Reverse = link.Groups[2].Success;
+				command.Url = link.Groups["url"].Value;
+				commands.Add(command);
+			}
+
+			foreach (Match link in OverlordUrlRegex.Matches(response))
+			{
+				OverlordCommand command = new OverlordCommand();
+				command.Index = link.Index;
+				command.Kind = "url";
+				command.Url = link.Groups["url"].Value;
+				commands.Add(command);
+			}
+
+			commands.Sort(delegate(OverlordCommand a, OverlordCommand b)
+			{
+				return a.Index.CompareTo(b.Index);
+			});
+			return commands;
+		}
+
 		/// <summary>
 		/// Decodes the commands and if necessary (re)starts the Attack.
 		/// Works with the Captures from RegEx.
@@ -1076,6 +1189,17 @@ namespace LOIC
 		/// <param name="vals">the CaptureCollection containing a collection of values corresponding to the commands.</param>
 		/// <returns>True if the commands were successfully loaded. False in case of any error.</returns>
 		private bool parseOLUrlCmd(CaptureCollection cmds, CaptureCollection vals)
+		{
+			List<string> keys = new List<string>();
+			List<string> values = new List<string>();
+			foreach (Capture cmd in cmds)
+				keys.Add(cmd.Value);
+			foreach (Capture val in vals)
+				values.Add(val.Value);
+			return parseOLUrlCommand(keys, values);
+		}
+
+		private bool parseOLUrlCommand(List<string> cmds, List<string> vals)
 		{
 			bool ret = false;
 			if ((cmds.Count == vals.Count) && (cmds.Count > 0))
@@ -1096,8 +1220,8 @@ namespace LOIC
 
 				for (int i = 0; i < cmds.Count; i++)
 				{
-					tval = vals[i].Value.Trim();
-					tcmd = cmds[i].Value.Trim();
+					tval = vals[i].Trim();
+					tcmd = cmds[i].Trim();
 					defaults.Remove(tcmd);
 					switch (tcmd.ToLowerInvariant())
 					{
@@ -1382,8 +1506,6 @@ namespace LOIC
 			tCheckOL.Stop();
 			if (enabled)
 			{
-				WebClient client = new WebClient();
-				client.Headers.Add("user-agent", "Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.0)"); // who knows at which door we are knocking o_O
 				try
 				{
 					labelOLStatus.Text = "connecting...";
@@ -1395,50 +1517,45 @@ namespace LOIC
 					{
 						try
 						{
-							string sResp = client.DownloadString(textOLServer.Text);
+							string sResp = DownloadOverlordResponse(textOLServer.Text);
 							labelOLStatus.Text = "processing...";
-							string rxpa = "(\\[LOIC\\]\\s*(<[^>]*>)*\\s*(@?(\\S+)\\s*[:]\\s*([^<@\\n\\r\\t]+)\\s*@?\\s*(<[^>]*>[^<@\\n\\r\\t]*)*\\s*)+\\s*(<[^>]*>)*\\s*\\[/LOIC\\]|class=\"LO (tar|bu)\\s*(r)?\" href=\"([^\"]*)\"|LOIC: http://(\\S+))+";
-							MatchCollection matches = Regex.Matches(sResp, rxpa, RegexOptions.Compiled | RegexOptions.IgnoreCase | RegexOptions.ECMAScript);
-							//string s = var_dump(matches, 0);
-							int i = (chkbOLUp.Checked) ? 0 : (matches.Count - 1);
-							if (matches.Count <= 0)
+							List<OverlordCommand> commands = ParseOverlordCommands(sResp);
+							int i = (chkbOLUp.Checked) ? 0 : (commands.Count - 1);
+							if (commands.Count <= 0)
 								throw new Exception("nothing here");
 
-							while ((i >= 0) && (i < matches.Count))
+							while ((i >= 0) && (i < commands.Count))
 							{
-								if ((matches[i].Groups[8].Captures.Count > 0) && (matches[i].Groups[10].Captures.Count > 0))
+								OverlordCommand command = commands[i];
+								if (command.Kind == "class")
 								{ // <a class="LO bu|tar r?" href="target">
-									if (matches[i].Groups[8].Captures[0].Value.ToLowerInvariant() == "bu")
+									if (command.ClassName == "bu")
 									{
-										if (matches[i].Groups[9].Captures.Count > 0)
+										if (command.Reverse)
 										{
-											if (!aDownOLSites.Contains(matches[i].Groups[10].Captures[0].Value))
-											{
-												aDownOLSites.Add(matches[i].Groups[10].Captures[0].Value);
-											}
+											if (!aDownOLSites.Contains(command.Url))
+												aDownOLSites.Add(command.Url);
 										}
 										else
 										{
-											if (!aUpOLSites.Contains(matches[i].Groups[10].Captures[0].Value))
-											{
-												aUpOLSites.Add(matches[i].Groups[10].Captures[0].Value);
-											}
+											if (!aUpOLSites.Contains(command.Url))
+												aUpOLSites.Add(command.Url);
 										}
 									}
-									else if (matches[i].Groups[8].Captures[0].Value.ToLowerInvariant() == "tar")
+									else if (command.ClassName == "tar")
 									{
-										if (getOLUrlCmd(matches[i].Groups[10].Captures[0].Value))
+										if (getOLUrlCmd(command.Url))
 											break;
 									}
 								}
-								else if (matches[i].Groups[11].Captures.Count > 0)
+								else if (command.Kind == "url")
 								{ // LOIC: URL
-									if (getOLUrlCmd(matches[i].Groups[11].Captures[0].Value))
+									if (getOLUrlCmd(command.Url))
 										break;
 								}
-								else if ((matches[i].Groups[4].Captures.Count > 0) && (matches[i].Groups[5].Captures.Count > 0))
+								else if (command.Kind == "pairs")
 								{
-									if (parseOLUrlCmd(matches[i].Groups[4].Captures, matches[i].Groups[5].Captures))
+									if (parseOLUrlCommand(command.Keys, command.Values))
 										break;
 								}
 								if (chkbOLUp.Checked)
@@ -1482,10 +1599,6 @@ namespace LOIC
 						enabled = false;
 						disableHive.Checked = true;
 					}
-				}
-				finally
-				{
-					client.Dispose();
 				}
 				if (enabled)
 					tCheckOL.Start();
