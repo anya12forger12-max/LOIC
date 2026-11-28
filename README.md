@@ -36,3 +36,14 @@ This project is deprecated security tooling, not a maintained benchmarking or lo
 ## License and credits
 
 Licensing is defined by [LICENSE.md](LICENSE.md): a public-domain dedication coupled with an educational-only condition, no express or implied warranties, and no liability for the licensor for user conduct. Application source is credited to NewEraCracker; the project is based on Praetox's LOIC. This repository is a copy that preserves those notices and adds two later community commits.
+
+## Quick start — 1 or 2 commands
+
+```bash
+./setup.sh          # install dependencies
+./setup.sh run      # start the project (when a run target exists)
+```
+
+`setup.sh` detects this repository's build system and installs the right toolchain
+dependencies. Use `./setup.sh test` to run the available checks. If a project has no
+standard run target, the script prints the correct command from the sections above.
