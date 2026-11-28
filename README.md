@@ -1,82 +1,38 @@
-## INFO
+# Low Orbit Ion Cannon (LOIC) — deprecated
 
-Low Orbit Ion Cannon (**LOIC**) is an open source network stress tool, written in C#.
-LOIC is based on Praetox's LOIC project at https://sourceforge.net/projects/loic/ .
+LOIC is a C# network stress-testing tool originally published by NewEraCracker and based on Praetox's LOIC project. This repository preserves the upstream source tree as a **historical reference**; it is deprecated, unmaintained, and provided "as is".
 
-## DISCLAIMER
+> **Upstream status:** [NewEraCracker/LOIC](https://github.com/NewEraCracker/LOIC) is archived and describes itself as *"Deprecated ... USE ON YOUR OWN RISK. WITHOUT ANY EXPRESS OR IMPLIED WARRANTIES."* The last commits in this copy date to 2022. This repository is not affiliated with, or supported by, the upstream authors.
 
-LOIC is for educational purposes only, intended to help server owners develop a "hacker defense" attitude. This tool comes without any warranty.
+## What LOIC is
 
-**You may not use this software for illegal or unethical purposes. This includes activities which give rise to criminal or civil liability.**
+The code in [src/](src/) is a Windows Forms application with protocol handlers for TCP, UDP, HTTP, `slowLOIC`, `ReCoil`, and ICMP traffic (see [Protocol.cs](src/Protocol.cs), [HTTPFlooder.cs](src/HTTPFlooder.cs), and [cHLDos.cs](src/cHLDos.cs)). It also contains the historical **HiveMind** (IRC-based) and **OverLord** (web-link-based) remote-control modes, along with an embedded IRC client under [src/IRC/](src/IRC/). Those modes are mentioned here only as context for reading the source; this README does not provide instructions for driving them.
 
-**Under no event shall the licensor be responsible for any activities, or misdeeds, by the licensee.**
+The original project described LOIC as an educational "hacker defense" aid: a way to study how network availability is affected by load. Its own disclaimer and license restrict use to educational purposes and disclaim all warranties.
 
-## HOW TO RUN ON WINDOWS
+## Repository contents
 
-GET THE BINARIES!
+| Path | Contents |
+|---|---|
+| [src/](src/) | C# application, solution (`LOIC.sln`), project files, and IRC client library |
+| [Help/](Help/) | Compiled CHM help plus the HTML help source |
+| [loic.sh](loic.sh), [loic-net4.0.sh](loic-net4.0.sh) | Legacy Mono install/build/run helpers targeting .NET 4.5 and .NET 4.0 respectively |
+| [LICENSE.md](LICENSE.md) | Public-domain dedication with an educational-use restriction and "AS-IS" warranty disclaimer |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Upstream contribution guidance (points to `NewEraCracker/LOIC`) |
 
-Requires Microsoft .NET Framework 3.5 Service Pack 1, available at:
-http://www.microsoft.com/downloads/en/details.aspx?FamilyID=ab99342f-5d1a-413d-8319-81da479ab0d7&displaylang=en
+## Historical build notes
 
-## HOW TO RUN ON LINUX / MACOSX
+The solution lives at [src/LOIC.sln](src/LOIC.sln). Upstream documentation required **.NET Framework 3.5 SP1** on Windows; Linux/macOS users were directed to Mono or Wine. The two shell helpers above install Mono packages, build with `xbuild`, and launch the resulting executable — they clone the *upstream* repository, not this copy, and assume 2010-era distributions. Treat them as reference material: they are unmaintained and are unlikely to work unchanged on current toolchains. No prebuilt binaries are included here.
 
-Run debug binaries with Mono or Wine.
-Read the wiki at https://github.com/NewEraCracker/LOIC/wiki/_pages for updated instructions.
+## Responsible use
 
-## HIVEMIND/HIDDEN MODE
+This project is deprecated security tooling, not a maintained benchmarking or load-testing suite. It can generate significant network traffic and historically has been used without authorization.
 
-HIVEMIND mode will connect your client to an IRC server so it can be controlled remotely.
-Think of this as a voluntary botnet. Please be aware that your client can potentially be
-made to do naughty things.
+- Only experiment on hardware and networks you own, or where you have explicit written authorization and a scoped test plan.
+- Do not point it at third-party services, shared networks, or infrastructure you do not control; availability testing without consent can be illegal and disruptive.
+- Follow applicable computer-misuse, telecommunications, and local laws. Having the source code is not permission to use it.
+- Coordinate any lab work with network owners, isolate it from production, and stop immediately if it affects unintended systems.
 
-Note: It does NOT allow remote administration of your machine; it 
-just providees control of LOIC itself.
+## License and credits
 
-If you want to start up in Hivemind mode, run something such as this:
-```
-	LOIC.exe /hivemind irc.server.address
-```
-which will connect to irc://irc.server.adress:6667/loic
-
-You can also specify a port and channel:
-```
-	LOIC.exe /hivemind irc.server.address 1234 #secret
-```
-which will connect to irc://irc.server.adress:1234/secret
-
-In order to run Hivemind Hidden mode, run something such as this:
-```
-	LOIC.exe /hidden /hivemind irc.server.address
-```
-which will connect to irc://irc.server.adress:6667/loic without any visible GUI.
-
-## CONTROLLING LOIC FROM IRC
-
-As an OP, Admin or Owner, set the channel topic or send a message such as the following:
-```
-	!lazor targetip=127.0.0.1 message=test_test port=80 method=tcp wait=false random=true
-```
-
-To start an attack, type:
-```
-	!lazor start
-```
-
-or append "start" to the END of the topic:
-```
-	!lazor targetip=127.0.0.1 message=test_test port=80 method=tcp wait=false random=true start
-```
-
-To reset LOIC's options back to their defaults:
-```
-	!lazor default
-```
-
-To stop an attack:
-```
-	!lazor stop
-```
-
-and **be sure to remove "start" from the END of the topic**, if it exists, as well.
-
-Take a look at the source code for more details.
+Licensing is defined by [LICENSE.md](LICENSE.md): a public-domain dedication coupled with an educational-only condition, no express or implied warranties, and no liability for the licensor for user conduct. Application source is credited to NewEraCracker; the project is based on Praetox's LOIC. This repository is a copy that preserves those notices and adds two later community commits.
